@@ -119,8 +119,6 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          checkout: false
-          branch: ${{ needs.setup.outputs.branch }}
           prompt: |
             REPO: ${{ github.repository }}
             PR: #${{ needs.setup.outputs.pr_number }}
@@ -144,6 +142,7 @@ jobs:
           claude_args: |
             --model claude-opus-4-6
             --max-turns 30
+            --allowed-tools "Bash(*),Read(*),Write(*),Edit(*),Glob(*),Grep(*),Task(*),TodoWrite(*),WebFetch(*),WebSearch(*)"
 
   # ── Stage 2: Plan ─────────────────────────────────────────────────
   plan:
@@ -168,8 +167,6 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          checkout: false
-          branch: ${{ needs.setup.outputs.branch }}
           prompt: |
             REPO: ${{ github.repository }}
             PR: #${{ needs.setup.outputs.pr_number }}
@@ -195,6 +192,7 @@ jobs:
           claude_args: |
             --model claude-opus-4-6
             --max-turns 30
+            --allowed-tools "Bash(*),Read(*),Write(*),Edit(*),Glob(*),Grep(*),Task(*),TodoWrite(*),WebFetch(*),WebSearch(*)"
 
   # ── Stage 3: Implement ────────────────────────────────────────────
   implement:
@@ -218,8 +216,6 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          checkout: false
-          branch: ${{ needs.setup.outputs.branch }}
           prompt: |
             REPO: ${{ github.repository }}
             PR: #${{ needs.setup.outputs.pr_number }}
@@ -247,3 +243,4 @@ jobs:
           claude_args: |
             --model claude-opus-4-6
             --max-turns 50
+            --allowed-tools "Bash(*),Read(*),Write(*),Edit(*),Glob(*),Grep(*),Task(*),TodoWrite(*),WebFetch(*),WebSearch(*)"
