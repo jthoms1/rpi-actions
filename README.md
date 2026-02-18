@@ -1,10 +1,66 @@
 # Agent Pipeline
 
-A three-stage AI agent pipeline — **Research**, **Plan**, **Implement** — that turns GitHub Issues into reviewed pull requests. Powered by [`claude-code-action`](https://github.com/anthropics/claude-code-action).
+A three-stage AI agent pipeline — **Research**, **Plan**, **Implement** — that turns GitHub Issues into reviewed pull requests. Powered by [`claude-code-action`](https://github.com/anthropics/claude-code-action). Based on research and work by [HumanLayer](https://humanlayer.dev).
 
-Label an issue with `agent:run`, and the agent autonomously researches your codebase, writes an implementation plan, builds the feature, and opens a PR. Reviewers see the research and plan alongside the code, and can send the agent back to any stage with `/replan` or `/reresearch` slash commands.
+Label an issue with `agent:run`, and the agent autonomously researches your codebase, writes an implementation plan, builds the feature, and opens a PR. Reviewers see the research and plan alongside the code, and can send the agent back to any stage with `/replan` or `/reresearch` slash commands in the PR comments.
 
 ## Overview
+
+### Pipeline flow
+
+```mermaid
+flowchart TD
+    %% ── Main Pipeline ──────────────────────────────────
+    Issue["📋 GitHub Issue<br/><i>Apply agent:run label</i>"]
+    Setup["⚙️ Setup<br/><i>Derive feature name & branch</i>"]
+    Research["🔍 Research<br/><i>Investigate codebase, write research.md</i>"]
+    Plan["📐 Plan<br/><i>Read research, write plan.md</i>"]
+    Implement["🔨 Implement<br/><i>Execute plan phase by phase</i>"]
+    PR["📬 Pull Request<br/><i>Links research & plan artifacts</i>"]
+    Cleanup["🏷️ Cleanup<br/><i>Remove agent:run label</i>"]
+
+    Issue --> Setup --> Research --> Plan --> Implement --> PR --> Cleanup
+
+    %% ── Artifacts ──────────────────────────────────────
+    ResearchMD[("research.md")]
+    PlanMD[("plan.md")]
+
+    Research -- "commit & push" --> ResearchMD
+    ResearchMD -- "read" --> Plan
+    Plan -- "commit & push" --> PlanMD
+    ResearchMD -- "read" --> Implement
+    PlanMD -- "read" --> Implement
+
+    %% ── Re-run Flows ──────────────────────────────────
+    Reviewer["💬 Reviewer Comment"]
+    ReSetup["⚙️ Parse Command<br/><i>👀 reaction, determine strategy</i>"]
+
+    PR -. "review" .-> Reviewer
+    Reviewer -- "/reresearch" --> ReSetup
+    Reviewer -- "/replan" --> ReSetup
+
+    ReSetup -- "/reresearch<br/>redo all 3 stages" --> Research
+    ReSetup -- "/replan<br/>keep research" --> Plan
+
+    %% ── Monthly Cleanup ────────────────────────────────
+    Cron["📅 Monthly Cron<br/><i>1st of each month</i>"]
+    Sweep["🧹 Sweep docs/agent-runs/<br/><i>PRs remain as permanent record</i>"]
+
+    Cron --> Sweep
+
+    %% ── Styling ────────────────────────────────────────
+    classDef stage fill:#4a90d9,stroke:#2c5282,color:#fff
+    classDef artifact fill:#f6e05e,stroke:#b7791f,color:#000
+    classDef trigger fill:#68d391,stroke:#276749,color:#000
+    classDef rerun fill:#fc8181,stroke:#9b2c2c,color:#000
+    classDef maint fill:#b794f4,stroke:#553c9a,color:#000
+
+    class Research,Plan,Implement stage
+    class ResearchMD,PlanMD artifact
+    class Issue,Cron trigger
+    class Reviewer,ReSetup rerun
+    class Sweep maint
+```
 
 ### How it works
 
@@ -12,8 +68,8 @@ Label an issue with `agent:run`, and the agent autonomously researches your code
 2. The agent runs three stages, committing after each:
 
     ```
-    commit 1: [research]  — Investigates the codebase, constraints, and context
-    commit 2: [plan]      — Produces a concrete implementation plan
+    commit 1:  [research]  — Investigates the codebase, constraints, and context
+    commit 2:  [plan]      — Produces a concrete implementation plan
     commit 3+: [implement] — Executes the code changes
     ```
 
@@ -123,7 +179,6 @@ Copy the following workflow files from this repo into your repository:
 
 - [`.github/workflows/agent-pipeline.yml`](.github/workflows/agent-pipeline.yml) — Triggers the full pipeline when `agent:run` is applied to an issue.
 - [`.github/workflows/agent-rerun.yml`](.github/workflows/agent-rerun.yml) — Handles dispatched re-run events (`/replan` and `/reresearch`).
-- [`.github/workflows/claude.yml`](.github/workflows/claude.yml) — Standard `@claude` interaction for ad-hoc questions on PRs and issues.
 - [`.github/workflows/monthly-agent-cleanup.yml`](.github/workflows/monthly-agent-cleanup.yml) — Sweeps `docs/agent-runs/` from main monthly.
 
 ### Step 4: Add skills
@@ -145,9 +200,9 @@ your-repo/
 ├── CLAUDE.md
 ├── .claude/
 │   └── skills/
-│       ├── research-codebase/SKILL.md   # /research-codebase skill
-│       ├── create-plan/SKILL.md        # /create-plan skill
-│       └── implement-plan/SKILL.md     # /implement-plan skill
+│       ├── research-codebase/SKILL.md
+│       ├── create-plan/SKILL.md
+│       └── implement-plan/SKILL.md
 └── .github/
     └── workflows/
         ├── agent-pipeline.yml
@@ -158,135 +213,18 @@ your-repo/
 
 ### Step 6 (Optional): Use a self-hosted runner
 
-By default, all workflows use GitHub-hosted runners (`ubuntu-latest`). The runner VM does very little — Claude Code mostly makes API calls to Anthropic — so you can save on GitHub Actions minutes by running on your own hardware.
+By default, all workflows use GitHub-hosted runners (`ubuntu-latest`). Since Claude Code's workload is mostly I/O-bound (API calls, git operations, light file editing), even low-powered hardware like a Raspberry Pi handles it well — and you save on GitHub Actions minutes.
 
-Set the repository variable `RUNS_ON` to `self-hosted` and the workflows will use your runner instead:
+To use a self-hosted runner:
 
-1. Go to **Settings > Secrets and variables > Actions > Variables**.
-2. Click **New repository variable**.
-3. Name: `RUNS_ON`, Value: `self-hosted`.
+1. Set up a self-hosted runner by following [GitHub's official guide](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/adding-self-hosted-runners). Make sure **Node.js**, **git**, and the **gh CLI** are installed on the runner machine.
+2. Set the `RUNS_ON` repository variable to `self-hosted`:
+   ```bash
+   gh variable set RUNS_ON --body "self-hosted"
+   ```
+   Or go to **Settings > Secrets and variables > Actions > Variables** and add `RUNS_ON` with value `self-hosted`.
 
-If the variable is not set, workflows fall back to `ubuntu-latest`.
-
-See [Self-Hosted Runner Setup](#self-hosted-runner-setup) below for full instructions on setting up a Raspberry Pi or other machine as a runner.
-
----
-
-## Self-Hosted Runner Setup
-
-A self-hosted runner eliminates GitHub Actions minutes costs entirely. Since Claude Code's workload is I/O-bound (API calls, git operations, light file editing), even a Raspberry Pi handles it comfortably.
-
-### Why self-host?
-
-| | GitHub-hosted | Self-hosted |
-|---|---|---|
-| Runner cost | ~$0.008/min (~$0.24 per 30-min run) | $0 marginal (you own the hardware) |
-| API cost | Anthropic API tokens | Same |
-| Availability | Subject to queuing | Always ready |
-| Setup | Zero | One-time setup |
-| Maintenance | Zero | You keep it updated |
-
-The Anthropic API cost is the dominant expense regardless of runner choice. Self-hosting removes the runner cost entirely.
-
-### Hardware requirements
-
-Claude Code on the runner needs very little:
-- **CPU**: Any modern ARM or x86 processor (Raspberry Pi 4/5, old laptop, cheap VPS)
-- **RAM**: 1-2 GB free (Node.js + git + gh CLI)
-- **Disk**: A few GB for the runner agent, repo checkouts, and Node.js
-- **Network**: Stable internet connection (the runner polls GitHub for jobs)
-
-### Raspberry Pi setup
-
-#### 1. Install the OS
-
-Use Raspberry Pi Imager to flash **Raspberry Pi OS Lite (64-bit)** to an SD card. Enable SSH during setup.
-
-#### 2. Install dependencies
-
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install Node.js (claude-code-action needs it)
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
-sudo apt install -y nodejs
-
-# Install git and gh CLI
-sudo apt install -y git
-sudo mkdir -p -m 755 /etc/apt/keyrings
-wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
-sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-sudo apt update && sudo apt install -y gh
-
-# Verify
-node --version && git --version && gh --version
-```
-
-#### 3. Create a runner user
-
-```bash
-sudo useradd -m -s /bin/bash runner
-sudo usermod -aG sudo runner
-sudo su - runner
-```
-
-#### 4. Install the GitHub Actions runner
-
-Go to your repository on GitHub: **Settings > Actions > Runners > New self-hosted runner**.
-
-GitHub will show commands specific to your repo. They look like this:
-
-```bash
-# Download (GitHub shows the current URL — use that, not this example)
-mkdir actions-runner && cd actions-runner
-curl -o actions-runner-linux-arm64-2.321.0.tar.gz -L \
-  https://github.com/actions/runner/releases/download/v2.321.0/actions-runner-linux-arm64-2.321.0.tar.gz
-tar xzf ./actions-runner-linux-arm64-2.321.0.tar.gz
-
-# Configure (GitHub provides your specific token)
-./config.sh --url https://github.com/YOUR-ORG/YOUR-REPO --token YOUR_TOKEN
-
-# Install and start as a service
-sudo ./svc.sh install
-sudo ./svc.sh start
-```
-
-> Use `linux-arm64` for Raspberry Pi, `linux-x64` for x86 machines.
-
-#### 5. Verify the runner is online
-
-Go to **Settings > Actions > Runners** — your runner should show as "Idle".
-
-#### 6. Set the repository variable
-
-```bash
-gh variable set RUNS_ON --body "self-hosted"
-```
-
-Or go to **Settings > Secrets and variables > Actions > Variables** and add `RUNS_ON` with value `self-hosted`.
-
-All workflows will now use your Raspberry Pi.
-
-### Other machines (VPS, old laptop, etc.)
-
-The steps are the same — install Node.js, git, and gh, then follow GitHub's self-hosted runner setup. A $4-6/month VPS (Hetzner CAX11, Oracle Cloud free tier) works well if you don't have hardware on hand.
-
-### Security considerations
-
-- **Private repos only**: GitHub [recommends](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security) self-hosted runners for private repositories. On public repos, anyone can fork and trigger workflows on your runner.
-- **Keep the runner updated**: Periodically update the runner agent, OS, Node.js, and gh CLI.
-- **Limit network exposure**: The runner only needs outbound HTTPS access to GitHub and Anthropic APIs. No inbound ports required.
-- **Secrets stay on the runner**: Your `CLAUDE_CODE_OAUTH_TOKEN` is available to jobs running on the machine. Treat the runner with the same security posture as any machine holding API keys.
-
-### Switching back to GitHub-hosted
-
-```bash
-gh variable delete RUNS_ON
-```
-
-Or set it back to `ubuntu-latest` with `gh variable set RUNS_ON --body "ubuntu-latest"`. The workflows fall back to GitHub-hosted runners immediately.
+If the variable is not set, workflows fall back to `ubuntu-latest`. To switch back, delete the variable or set it to `ubuntu-latest`.
 
 ---
 
