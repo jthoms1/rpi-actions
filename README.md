@@ -85,7 +85,6 @@ The commands are interactive — they ask clarifying questions and present optio
 ### Prerequisites
 
 - A GitHub repository
-- An [Anthropic API key](https://console.anthropic.com/)
 - The [Claude GitHub App](https://github.com/apps/claude) installed on your repo
 
 ### Step 1: Install claude-code-action
@@ -97,16 +96,18 @@ claude
 > /install-github-app
 ```
 
-This installs the Claude GitHub App and walks you through adding `ANTHROPIC_API_KEY` to your repository secrets.
+This installs the Claude GitHub App and walks you through adding `CLAUDE_CODE_OAUTH_TOKEN` to your repository secrets.
 
 Alternatively, set it up manually:
 
 1. Install the [Claude GitHub App](https://github.com/apps/claude) on your repository.
-2. Add your API key as a repository secret:
+2. Add your OAuth token as a repository secret:
    ```bash
-   gh secret set ANTHROPIC_API_KEY
+   gh secret set CLAUDE_CODE_OAUTH_TOKEN
    ```
    Or go to **Settings > Secrets and variables > Actions** and add it there.
+
+> **Using an Anthropic API key instead?** The workflows use `claude_code_oauth_token` by default. If you prefer to use an [Anthropic API key](https://console.anthropic.com/) directly, replace `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}` with `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` in each workflow file, and store your API key as the `ANTHROPIC_API_KEY` secret.
 
 ### Step 2: Create the GitHub label
 
@@ -118,262 +119,44 @@ Or create it manually: go to **Issues > Labels > New label**, name it `agent:run
 
 ### Step 3: Add workflow files
 
-Create the following files in your repository:
+Copy the following workflow files from this repo into your repository:
 
-**`.github/workflows/agent-pipeline.yml`** — Triggers the full pipeline when `agent:run` is applied to an issue.
+- [`.github/workflows/agent-pipeline.yml`](.github/workflows/agent-pipeline.yml) — Triggers the full pipeline when `agent:run` is applied to an issue.
+- [`.github/workflows/agent-rerun.yml`](.github/workflows/agent-rerun.yml) — Handles dispatched re-run events (`/replan` and `/reresearch`).
+- [`.github/workflows/claude.yml`](.github/workflows/claude.yml) — Standard `@claude` interaction for ad-hoc questions on PRs and issues.
+- [`.github/workflows/monthly-agent-cleanup.yml`](.github/workflows/monthly-agent-cleanup.yml) — Sweeps `docs/agent-runs/` from main monthly.
 
-```yaml
-name: Agent Pipeline
+### Step 4: Add commands
 
-on:
-  issues:
-    types: [labeled]
+Copy the command files from this repo into your repository:
 
-jobs:
-  run-pipeline:
-    if: github.event.label.name == 'agent:run'
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
+- [`.claude/commands/research_codebase.md`](.claude/commands/research_codebase.md) — `/research_codebase` command
+- [`.claude/commands/create_plan.md`](.claude/commands/create_plan.md) — `/create_plan` command
+- [`.claude/commands/implement_plan.md`](.claude/commands/implement_plan.md) — `/implement_plan` command
 
-      - uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            REPO: ${{ github.repository }}
-            ISSUE: #${{ github.event.issue.number }}
-            TASK: ${{ github.event.issue.title }}
-            DESCRIPTION:
-            ${{ github.event.issue.body }}
+### Step 5: Add CLAUDE.md
 
-            Execute the three-stage agent pipeline defined in CLAUDE.md.
-            Create a feature branch, run Research → Plan → Implement,
-            and open a PR linking back to issue #${{ github.event.issue.number }}.
-          claude_args: |
-            --model claude-opus-4-6
-            --max-turns 50
-
-      - name: Remove trigger label
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              name: 'agent:run',
-            });
-```
-
-**`.github/workflows/slash-commands.yml`** — Parses `/replan` and `/reresearch` on PR comments.
-
-```yaml
-name: Slash Commands
-
-on:
-  issue_comment:
-    types: [created]
-
-jobs:
-  run:
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
-    steps:
-      - uses: wow-actions/slash-commands@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CONFIG_FILE: .github/slash-commands.yml
-```
-
-**`.github/slash-commands.yml`** — Config for the slash command action.
-
-```yaml
-pulls:
-  replan:
-    reactions: ["eyes"]
-    dispatch: true
-    comment: >
-      Re-planning in progress. Claude will re-read the research, regenerate
-      the plan with your feedback, and re-implement.
-
-  reresearch:
-    reactions: ["eyes"]
-    dispatch: true
-    comment: >
-      Re-researching in progress. Claude will redo the research stage
-      with your feedback, then regenerate the plan and implementation.
-```
-
-**`.github/workflows/agent-rerun.yml`** — Handles dispatched re-run events.
-
-```yaml
-name: Agent Re-Run
-
-on:
-  repository_dispatch:
-    types: [replan, reresearch]
-
-jobs:
-  rerun:
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      id-token: write
-    steps:
-      - name: Determine context
-        id: context
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const payload = context.payload.client_payload;
-            const command = context.payload.action;
-            const stage = command === 'reresearch' ? 'research' : 'plan';
-            const feedback = payload.input || '';
-            const prNumber = payload.github?.payload?.issue?.number;
-            const commentAuthor = payload.github?.payload?.comment?.user?.login || '';
-
-            let prAuthor = '';
-            if (prNumber) {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-              });
-              prAuthor = pr.user.login;
-            }
-
-            const commitStrategy = (commentAuthor === prAuthor) ? 'force-push' : 'append';
-
-            core.setOutput('stage', stage);
-            core.setOutput('feedback', feedback);
-            core.setOutput('pr_number', prNumber || '');
-            core.setOutput('commit_strategy', commitStrategy);
-
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Checkout PR branch
-        if: steps.context.outputs.pr_number != ''
-        run: gh pr checkout ${{ steps.context.outputs.pr_number }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            REPO: ${{ github.repository }}
-            PR: #${{ steps.context.outputs.pr_number }}
-            RE-RUN FROM STAGE: ${{ steps.context.outputs.stage }}
-            COMMIT STRATEGY: ${{ steps.context.outputs.commit_strategy }}
-            REVIEWER FEEDBACK:
-            ${{ steps.context.outputs.feedback }}
-
-            Follow the re-run protocol in CLAUDE.md.
-            Re-run from the "${{ steps.context.outputs.stage }}" stage,
-            incorporating the reviewer feedback above.
-            Use the "${{ steps.context.outputs.commit_strategy }}" commit strategy.
-          claude_args: |
-            --model claude-opus-4-6
-            --max-turns 50
-```
-
-**`.github/workflows/claude.yml`** — Standard `@claude` interaction for ad-hoc questions on PRs and issues.
-
-```yaml
-name: Claude Assistant
-
-on:
-  issue_comment:
-    types: [created]
-  pull_request_review_comment:
-    types: [created]
-  issues:
-    types: [opened, assigned, labeled]
-  pull_request_review:
-    types: [submitted]
-
-jobs:
-  claude-response:
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: |
-            --model claude-opus-4-6
-```
-
-**`.github/workflows/monthly-agent-cleanup.yml`** — Sweeps `docs/agent-runs/` from main monthly.
-
-```yaml
-name: Monthly Agent Docs Cleanup
-
-on:
-  schedule:
-    - cron: '0 0 1 * *'
-  workflow_dispatch:
-
-jobs:
-  cleanup:
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Remove agent run artifacts
-        run: |
-          if [ -d "docs/agent-runs" ] && [ "$(ls -A docs/agent-runs)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git rm -r docs/agent-runs/*
-            git commit -m "chore: monthly cleanup of agent run artifacts"
-            git push
-          fi
-```
-
-### Step 4: Add CLAUDE.md
-
-Create a `CLAUDE.md` file in your repository root. This is the core of the pipeline — `claude-code-action` reads it automatically on every invocation. See [CLAUDE.md](#claudemd-reference) below for the full template.
+Create a `CLAUDE.md` file in your repository root. This is the core of the pipeline — `claude-code-action` reads it automatically on every invocation. It should define the three-stage pipeline protocol, re-run protocol, and document structure templates for research and plan outputs.
 
 ### Summary of files
 
 ```
 your-repo/
 ├── CLAUDE.md
-├── commands/
-│   ├── research_codebase.md    # /research_codebase command
-│   ├── create_plan.md          # /create_plan command
-│   └── implement_plan.md       # /implement_plan command
-├── .github/
-│   ├── slash-commands.yml
-│   └── workflows/
-│       ├── agent-pipeline.yml
-│       ├── agent-rerun.yml
-│       ├── claude.yml
-│       ├── monthly-agent-cleanup.yml
-│       └── slash-commands.yml
+├── .claude/
+│   └── commands/
+│       ├── research_codebase.md    # /research_codebase command
+│       ├── create_plan.md          # /create_plan command
+│       └── implement_plan.md       # /implement_plan command
+└── .github/
+    └── workflows/
+        ├── agent-pipeline.yml
+        ├── agent-rerun.yml
+        ├── claude.yml
+        └── monthly-agent-cleanup.yml
 ```
 
-The `commands/` directory contains Claude Code custom commands that define the process for each pipeline stage. These are available as `/research_codebase`, `/create_plan`, and `/implement_plan` in any Claude Code session within the repo.
-
-### Step 5 (Optional): Use a self-hosted runner
+### Step 6 (Optional): Use a self-hosted runner
 
 By default, all workflows use GitHub-hosted runners (`ubuntu-latest`). The runner VM does very little — Claude Code mostly makes API calls to Anthropic — so you can save on GitHub Actions minutes by running on your own hardware.
 
@@ -495,7 +278,7 @@ The steps are the same — install Node.js, git, and gh, then follow GitHub's se
 - **Private repos only**: GitHub [recommends](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security) self-hosted runners for private repositories. On public repos, anyone can fork and trigger workflows on your runner.
 - **Keep the runner updated**: Periodically update the runner agent, OS, Node.js, and gh CLI.
 - **Limit network exposure**: The runner only needs outbound HTTPS access to GitHub and Anthropic APIs. No inbound ports required.
-- **Secrets stay on the runner**: Your `ANTHROPIC_API_KEY` is available to jobs running on the machine. Treat the runner with the same security posture as any machine holding API keys.
+- **Secrets stay on the runner**: Your `CLAUDE_CODE_OAUTH_TOKEN` is available to jobs running on the machine. Treat the runner with the same security posture as any machine holding API keys.
 
 ### Switching back to GitHub-hosted
 
@@ -571,120 +354,3 @@ Output: `plans/2025-01-15-add-rate-limiting.md`
 Output: Code changes as described in the plan.
 
 Each command is interactive and will pause for your input between steps. When running via the GitHub Actions pipeline, the same methodology is used but output goes to `docs/agent-runs/<feature-name>/` instead.
-
----
-
-## CLAUDE.md Reference
-
-Copy this into your repository root and customize as needed. The pipeline protocol references the commands in `commands/` as the authoritative process definitions for each stage.
-
-```markdown
-# Agent Pipeline Protocol
-
-## Commands
-
-The `commands/` directory contains three Claude Code commands that define the process
-for each pipeline stage: `/research_codebase`, `/create_plan`, and `/implement_plan`.
-These commands are the authoritative reference for how each stage should be executed.
-When running the pipeline, follow their methodology while using the output paths
-specified below.
-
-## Three-Stage Pipeline
-
-When executing the agent pipeline (triggered by an `agent:run` label on an issue),
-follow these stages in order:
-
-### Stage 1: Research
-- Follow the research methodology defined in `commands/research_codebase.md`.
-- Investigate the codebase relevant to the task using parallel sub-agents.
-- Read documentation, identify constraints, and gather context.
-- Document what exists — do not suggest improvements or critique the implementation.
-- Write findings to `docs/agent-runs/<feature-name>/research.md`.
-- Commit with message: `[research] Add research for <feature-name>`
-
-### Stage 2: Plan
-- Follow the planning methodology defined in `commands/create_plan.md`.
-- Read your research output.
-- Create a concrete implementation plan with phased changes, approach, and tradeoffs.
-- Include automated and manual success criteria for each phase.
-- Write to `docs/agent-runs/<feature-name>/plan.md`.
-- Commit with message: `[plan] Add implementation plan for <feature-name>`
-
-### Stage 3: Implement
-- Follow the implementation methodology defined in `commands/implement_plan.md`.
-- Read both research.md and plan.md.
-- Execute the code changes described in the plan, phase by phase.
-- Run automated verification after each phase.
-- Commit with message: `[implement] <description of changes>`
-
-### Metadata
-After all stages, create or update `docs/agent-runs/<feature-name>/run-metadata.yml`
-with timestamps and model info for each stage completed.
-
-### PR Format
-Open a PR with this description format:
-
-    ## Agent Context
-    - [Research](docs/agent-runs/<feature-name>/research.md)
-    - [Plan](docs/agent-runs/<feature-name>/plan.md)
-
-    ## Summary
-    <Summary of what was implemented and why>
-
-    Closes #<issue-number>
-
-### Feature Name Convention
-Derive `<feature-name>` from the issue title, converted to kebab-case.
-Example: "Add rate limiting to API endpoints" → `add-rate-limiting-to-api-endpoints`.
-
----
-
-## Re-Run Protocol
-
-When triggered by a `/replan` or `/reresearch` slash command, the prompt will include
-the stage to re-run from, the reviewer's feedback, and the commit strategy to use.
-
-Steps:
-1. Read the reviewer feedback from the prompt.
-2. Re-run from the specified stage, carrying forward earlier artifacts where applicable.
-   - `/replan`: Keep `research.md`, regenerate `plan.md`, then re-implement.
-   - `/reresearch`: Redo all three stages from scratch.
-3. Apply the specified commit strategy:
-   - `force-push`: Rebase/amend the relevant stage commits (same author re-running).
-   - `append`: Add new commits on top (different person re-running).
-4. Update `run-metadata.yml` to reflect the re-run with the feedback reason.
-
----
-
-## Research Document Structure
-
-    # Research: <feature-name>
-
-    ## Task
-    <Restate the task from the issue>
-
-    ## Codebase Analysis
-    <Relevant files, patterns, and architecture notes>
-
-    ## Constraints & Dependencies
-    <What limits the solution space>
-
-    ## Open Questions (Resolved)
-    <Questions that came up during research and how they were resolved>
-
-## Plan Document Structure
-
-    # Plan: <feature-name>
-
-    ## Approach
-    <High-level description of the solution>
-
-    ## Files to Change
-    <List of files with what changes in each>
-
-    ## Tradeoffs
-    <What alternatives were considered and why this approach was chosen>
-
-    ## Sequence
-    <Order of implementation steps>
-```

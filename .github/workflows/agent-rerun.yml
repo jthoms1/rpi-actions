@@ -15,7 +15,7 @@
 #        - /reresearch:  Re-run Research → Plan → Implement (fresh start).
 #
 # Required secrets:
-#   - ANTHROPIC_API_KEY
+#   - CLAUDE_CODE_OAUTH_TOKEN
 #
 # Optional variables:
 #   - vars.RUNS_ON — override the runner (e.g. self-hosted). Defaults to ubuntu-latest.
@@ -118,7 +118,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           checkout: false
           branch: ${{ needs.setup.outputs.branch }}
           prompt: |
@@ -167,7 +167,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           checkout: false
           branch: ${{ needs.setup.outputs.branch }}
           prompt: |
@@ -217,7 +217,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           checkout: false
           branch: ${{ needs.setup.outputs.branch }}
           prompt: |
