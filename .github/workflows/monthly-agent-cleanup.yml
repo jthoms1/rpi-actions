@@ -1,0 +1,44 @@
+# .github/workflows/monthly-agent-cleanup.yml
+#
+# Monthly Agent Docs Cleanup — sweep stale pipeline artifacts from main
+#
+# Trigger:
+#   Runs on the 1st of every month at midnight UTC (cron), or manually via
+#   workflow_dispatch.
+#
+# What it does:
+#   1. Checks out the repo.
+#   2. If docs/agent-runs/ exists and is non-empty, removes all contents
+#      with "git rm", commits the deletion, and pushes to main.
+#   3. If the directory is already empty or missing, the job is a no-op.
+#
+# Why:
+#   Research and plan artifacts land on main when PRs merge. They're useful
+#   for a while (related work, debugging) but accumulate over time. The PR
+#   itself is the permanent record — GitHub preserves the full diff forever —
+#   so these files can be safely cleaned up periodically.
+#
+# Optional variables:
+#   - vars.RUNS_ON — override the runner (e.g. self-hosted). Defaults to ubuntu-latest.
+name: Monthly Agent Docs Cleanup
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove agent run artifacts
+        run: |
+          if [ -d "docs/agent-runs" ] && [ "$(ls -A docs/agent-runs)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git rm -r docs/agent-runs/*
+            git commit -m "chore: monthly cleanup of agent run artifacts"
+            git push
+          fi

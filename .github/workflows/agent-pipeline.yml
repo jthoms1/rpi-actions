@@ -1,0 +1,214 @@
+# .github/workflows/agent-pipeline.yml
+#
+# Agent Pipeline — Research → Plan → Implement in isolated stages
+#
+# Trigger:
+#   Fires when the "agent:run" label is applied to a GitHub Issue.
+#
+# What it does:
+#   Runs three completely separate Claude invocations, each with a fresh
+#   context window. Stages communicate exclusively through committed file
+#   artifacts (research.md, plan.md) — not shared conversation history.
+#
+#   Stage 1 (Research): Investigate the codebase, write research.md, commit & push.
+#   Stage 2 (Plan):     Read research.md, write plan.md, commit & push.
+#   Stage 3 (Implement): Read research.md + plan.md, implement, commit & push, open PR.
+#
+# Required secrets:
+#   - ANTHROPIC_API_KEY
+#
+# Optional variables:
+#   - vars.RUNS_ON — override the runner (e.g. self-hosted). Defaults to ubuntu-latest.
+name: Agent Pipeline
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  # ── Derive feature name and branch ────────────────────────────────
+  setup:
+    if: github.event.label.name == 'agent:run'
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    outputs:
+      feature_name: ${{ steps.meta.outputs.feature_name }}
+      branch: ${{ steps.meta.outputs.branch }}
+    steps:
+      - name: Derive feature name from issue title
+        id: meta
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = context.payload.issue.title;
+            const featureName = title
+              .toLowerCase()
+              .replace(/[^a-z0-9\s-]/g, '')
+              .trim()
+              .replace(/\s+/g, '-');
+            const branch = `agent/${featureName}`;
+            core.setOutput('feature_name', featureName);
+            core.setOutput('branch', branch);
+
+  # ── Stage 1: Research ─────────────────────────────────────────────
+  research:
+    needs: setup
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create feature branch
+        run: |
+          git checkout -b ${{ needs.setup.outputs.branch }}
+          git push -u origin ${{ needs.setup.outputs.branch }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          checkout: false
+          branch: ${{ needs.setup.outputs.branch }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE: #${{ github.event.issue.number }}
+            FEATURE_NAME: ${{ needs.setup.outputs.feature_name }}
+            TASK: ${{ github.event.issue.title }}
+            DESCRIPTION:
+            ${{ github.event.issue.body }}
+
+            You are running Stage 1 (Research) of the agent pipeline.
+
+            Follow the research methodology in CLAUDE.md:
+            - Investigate the codebase relevant to the task using parallel sub-agents.
+            - Read documentation, identify constraints, and gather context.
+            - Document what exists — do not suggest improvements or critique.
+            - Write findings to docs/agent-runs/${{ needs.setup.outputs.feature_name }}/research.md
+              using the Research Document Structure from CLAUDE.md.
+
+            When finished:
+            - Commit with message: [research] Add research for ${{ needs.setup.outputs.feature_name }}
+            - Push to the branch.
+
+            Do NOT proceed to planning or implementation. Your only job is research.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 30
+
+  # ── Stage 2: Plan ─────────────────────────────────────────────────
+  plan:
+    needs: [setup, research]
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.branch }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          checkout: false
+          branch: ${{ needs.setup.outputs.branch }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE: #${{ github.event.issue.number }}
+            FEATURE_NAME: ${{ needs.setup.outputs.feature_name }}
+            TASK: ${{ github.event.issue.title }}
+            DESCRIPTION:
+            ${{ github.event.issue.body }}
+
+            You are running Stage 2 (Plan) of the agent pipeline.
+
+            Start by reading the research output:
+              docs/agent-runs/${{ needs.setup.outputs.feature_name }}/research.md
+
+            Then follow the planning methodology in CLAUDE.md:
+            - Create a concrete implementation plan with phased changes, approach, and tradeoffs.
+            - Include automated and manual success criteria for each phase.
+            - Write to docs/agent-runs/${{ needs.setup.outputs.feature_name }}/plan.md
+              using the Plan Document Structure from CLAUDE.md.
+
+            When finished:
+            - Commit with message: [plan] Add implementation plan for ${{ needs.setup.outputs.feature_name }}
+            - Push to the branch.
+
+            Do NOT implement anything. Your only job is to produce the plan.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 30
+
+  # ── Stage 3: Implement ────────────────────────────────────────────
+  implement:
+    needs: [setup, plan]
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.branch }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          checkout: false
+          branch: ${{ needs.setup.outputs.branch }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE: #${{ github.event.issue.number }}
+            FEATURE_NAME: ${{ needs.setup.outputs.feature_name }}
+            TASK: ${{ github.event.issue.title }}
+            DESCRIPTION:
+            ${{ github.event.issue.body }}
+
+            You are running Stage 3 (Implement) of the agent pipeline.
+
+            Start by reading these artifacts:
+              docs/agent-runs/${{ needs.setup.outputs.feature_name }}/research.md
+              docs/agent-runs/${{ needs.setup.outputs.feature_name }}/plan.md
+
+            Then follow the implementation methodology in CLAUDE.md:
+            - Execute the code changes described in the plan, phase by phase.
+            - Run automated verification after each phase.
+            - Commit each logical unit with message: [implement] <description of changes>
+            - Push to the branch.
+
+            After all implementation is complete:
+            - Create or update docs/agent-runs/${{ needs.setup.outputs.feature_name }}/run-metadata.yml
+              with timestamps and model info for all three stages (use the current time
+              for the implement stage; estimate earlier stages from git log timestamps).
+            - Commit with message: [metadata] Add run metadata for ${{ needs.setup.outputs.feature_name }}
+            - Open a PR targeting main with the format specified in CLAUDE.md,
+              linking back to issue #${{ github.event.issue.number }}.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 50
+
+  # ── Cleanup ───────────────────────────────────────────────────────
+  cleanup:
+    needs: [implement]
+    if: always()
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      issues: write
+    steps:
+      - name: Remove trigger label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              name: 'agent:run',
+            });

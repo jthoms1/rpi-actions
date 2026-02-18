@@ -1,0 +1,54 @@
+# .github/workflows/claude.yml
+#
+# Claude Assistant — general-purpose @claude interactions
+#
+# Trigger:
+#   Fires on issue comments, PR review comments, new/assigned/labeled issues,
+#   and submitted PR reviews. This is the standard claude-code-action setup
+#   for ad-hoc questions and requests (e.g. "@claude explain this function").
+#
+# What it does:
+#   1. Checks out the repo with full history.
+#   2. Invokes claude-code-action which reads CLAUDE.md for project context
+#      and responds to the user's comment or event.
+#
+# Note:
+#   This workflow is NOT used for pipeline re-runs (/replan, /reresearch) —
+#   those are handled by agent-rerun.yml. This is for general conversation
+#   with Claude on issues and PRs.
+#
+# Required secrets:
+#   - ANTHROPIC_API_KEY
+#
+# Optional variables:
+#   - vars.RUNS_ON — override the runner (e.g. self-hosted). Defaults to ubuntu-latest.
+name: Claude Assistant
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned, labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude-response:
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --model claude-opus-4-6

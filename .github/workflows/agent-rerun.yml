@@ -1,0 +1,249 @@
+# .github/workflows/agent-rerun.yml
+#
+# Agent Re-Run — re-run pipeline stages from reviewer feedback
+#
+# Trigger:
+#   Fires on PR comments that start with "/replan" or "/reresearch".
+#   Only matches comments on pull requests (not plain issues).
+#
+# What it does:
+#   1. Adds an "eyes" reaction to the comment to acknowledge receipt.
+#   2. Parses the command and extracts reviewer feedback.
+#   3. Determines the commit strategy (force-push vs append).
+#   4. Re-runs the appropriate stages in isolated Claude contexts:
+#        - /replan:      Re-run Plan → Implement (keeps research.md).
+#        - /reresearch:  Re-run Research → Plan → Implement (fresh start).
+#
+# Required secrets:
+#   - ANTHROPIC_API_KEY
+#
+# Optional variables:
+#   - vars.RUNS_ON — override the runner (e.g. self-hosted). Defaults to ubuntu-latest.
+name: Agent Re-Run
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  # ── Parse command and context ─────────────────────────────────────
+  setup:
+    if: >
+      github.event.issue.pull_request &&
+      (startsWith(github.event.comment.body, '/replan') || startsWith(github.event.comment.body, '/reresearch'))
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      issues: write
+      pull-requests: write
+    outputs:
+      stage: ${{ steps.context.outputs.stage }}
+      feedback: ${{ steps.context.outputs.feedback }}
+      pr_number: ${{ steps.context.outputs.pr_number }}
+      commit_strategy: ${{ steps.context.outputs.commit_strategy }}
+      feature_name: ${{ steps.context.outputs.feature_name }}
+      branch: ${{ steps.context.outputs.branch }}
+      is_reresearch: ${{ steps.context.outputs.is_reresearch }}
+    steps:
+      - name: Acknowledge command
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
+
+      - name: Determine context
+        id: context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.comment.body.trim();
+            const isReresearch = body.startsWith('/reresearch');
+            const stage = isReresearch ? 'research' : 'plan';
+            const command = isReresearch ? '/reresearch' : '/replan';
+            const feedback = body.slice(command.length).trim();
+
+            const prNumber = context.payload.issue.number;
+            const commentAuthor = context.payload.comment.user.login;
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const prAuthor = pr.user.login;
+            const commitStrategy = (commentAuthor === prAuthor) ? 'force-push' : 'append';
+            const branch = pr.head.ref;
+
+            // Derive feature name from branch (strip agent/ prefix)
+            const featureName = branch.replace(/^agent\//, '');
+
+            const message = isReresearch
+              ? '🔄 Re-researching. Claude will redo research → plan → implement in isolated stages with your feedback.'
+              : '🔄 Re-planning. Claude will redo plan → implement in isolated stages with your feedback.';
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: message,
+            });
+
+            core.setOutput('stage', stage);
+            core.setOutput('feedback', feedback);
+            core.setOutput('pr_number', prNumber);
+            core.setOutput('commit_strategy', commitStrategy);
+            core.setOutput('feature_name', featureName);
+            core.setOutput('branch', branch);
+            core.setOutput('is_reresearch', isReresearch ? 'true' : 'false');
+
+  # ── Stage 1: Research (only for /reresearch) ──────────────────────
+  research:
+    needs: setup
+    if: needs.setup.outputs.is_reresearch == 'true'
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.branch }}
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          checkout: false
+          branch: ${{ needs.setup.outputs.branch }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: #${{ needs.setup.outputs.pr_number }}
+            FEATURE_NAME: ${{ needs.setup.outputs.feature_name }}
+            COMMIT STRATEGY: ${{ needs.setup.outputs.commit_strategy }}
+            REVIEWER FEEDBACK:
+            ${{ needs.setup.outputs.feedback }}
+
+            You are RE-RUNNING Stage 1 (Research) based on reviewer feedback.
+
+            Follow the re-run protocol and research methodology in CLAUDE.md.
+            Incorporate the reviewer feedback above into your research.
+            Write to docs/agent-runs/${{ needs.setup.outputs.feature_name }}/research.md
+
+            Commit strategy: ${{ needs.setup.outputs.commit_strategy }}
+            - If "force-push": amend or rebase the research commit.
+            - If "append": add a new commit on top.
+
+            Commit message: [research] Re-research ${{ needs.setup.outputs.feature_name }}
+            Push to the branch. Do NOT proceed to planning or implementation.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 30
+
+  # ── Stage 2: Plan ─────────────────────────────────────────────────
+  plan:
+    needs: [setup, research]
+    if: always() && (needs.research.result == 'success' || needs.research.result == 'skipped')
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.branch }}
+          fetch-depth: 0
+
+      # Pull latest in case research just pushed
+      - name: Pull latest
+        run: git pull origin ${{ needs.setup.outputs.branch }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          checkout: false
+          branch: ${{ needs.setup.outputs.branch }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: #${{ needs.setup.outputs.pr_number }}
+            FEATURE_NAME: ${{ needs.setup.outputs.feature_name }}
+            COMMIT STRATEGY: ${{ needs.setup.outputs.commit_strategy }}
+            REVIEWER FEEDBACK:
+            ${{ needs.setup.outputs.feedback }}
+
+            You are RE-RUNNING Stage 2 (Plan) based on reviewer feedback.
+
+            Start by reading: docs/agent-runs/${{ needs.setup.outputs.feature_name }}/research.md
+
+            Follow the re-run protocol and planning methodology in CLAUDE.md.
+            Incorporate the reviewer feedback above into your plan.
+            Write to docs/agent-runs/${{ needs.setup.outputs.feature_name }}/plan.md
+
+            Commit strategy: ${{ needs.setup.outputs.commit_strategy }}
+            - If "force-push": amend or rebase the plan commit.
+            - If "append": add a new commit on top.
+
+            Commit message: [plan] Re-plan ${{ needs.setup.outputs.feature_name }}
+            Push to the branch. Do NOT implement anything.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 30
+
+  # ── Stage 3: Implement ────────────────────────────────────────────
+  implement:
+    needs: [setup, plan]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.branch }}
+          fetch-depth: 0
+
+      - name: Pull latest
+        run: git pull origin ${{ needs.setup.outputs.branch }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          checkout: false
+          branch: ${{ needs.setup.outputs.branch }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: #${{ needs.setup.outputs.pr_number }}
+            FEATURE_NAME: ${{ needs.setup.outputs.feature_name }}
+            COMMIT STRATEGY: ${{ needs.setup.outputs.commit_strategy }}
+            REVIEWER FEEDBACK:
+            ${{ needs.setup.outputs.feedback }}
+
+            You are RE-RUNNING Stage 3 (Implement) based on reviewer feedback.
+
+            Start by reading:
+              docs/agent-runs/${{ needs.setup.outputs.feature_name }}/research.md
+              docs/agent-runs/${{ needs.setup.outputs.feature_name }}/plan.md
+
+            Follow the implementation methodology in CLAUDE.md.
+            Execute the plan phase by phase, running verification after each.
+
+            Commit strategy: ${{ needs.setup.outputs.commit_strategy }}
+            - If "force-push": amend or rebase implementation commits.
+            - If "append": add new commits on top.
+
+            Commit message: [implement] <description of changes>
+            Update run-metadata.yml with re-run info.
+            Push to the branch.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 50
