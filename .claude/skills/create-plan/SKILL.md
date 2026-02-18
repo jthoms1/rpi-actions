@@ -1,6 +1,11 @@
 ---
+name: create-plan
 description: Create detailed implementation plans through interactive research and iteration
-model: claude-opus-4-6
+argument-hint: "[file-path]"
+allowed-tools: [Read, Glob, Grep, Write, Edit, Task, TodoWrite]
+disable-model-invocation: true
+user-invocable: true
+context: fork
 ---
 
 # Implementation Plan
@@ -17,6 +22,7 @@ When this command is invoked:
    - Begin the research process
 
 2. **If no parameters provided**, respond with:
+
 ```
 I'll help you create a detailed implementation plan. Let me start by understanding what we're building.
 
@@ -27,8 +33,8 @@ Please provide:
 
 I'll analyze this information and work with you to create a comprehensive plan.
 
-Tip: You can also invoke this command with a file directly: `/create_plan path/to/requirements.md`
-For deeper analysis, try: `/create_plan think deeply about path/to/requirements.md`
+Tip: You can also invoke this command with a file directly: `/create-plan path/to/requirements.md`
+For deeper analysis, try: `/create-plan think deeply about path/to/requirements.md`
 ```
 
 Then wait for the user's input.
@@ -48,7 +54,6 @@ Then wait for the user's input.
 
 2. **Spawn initial research tasks to gather context**:
    Before asking the user any questions, use agents to research in parallel:
-
    - Use **Explore** agents (`subagent_type=Explore`) to find all files related to the task
    - Use **general-purpose** agents (`subagent_type=general-purpose`) to understand how the current implementation works
 
@@ -70,6 +75,7 @@ Then wait for the user's input.
    - Determine true scope based on codebase reality
 
 5. **Present informed understanding and focused questions**:
+
    ```
    Based on the requirements and my research of the codebase, I understand we need to [accurate summary].
 
@@ -115,9 +121,10 @@ After getting initial clarifications:
    - Return specific file:line references
    - Find tests and examples
 
-3. **Wait for ALL sub-tasks to complete** before proceeding
+4. **Wait for ALL sub-tasks to complete** before proceeding
 
-4. **Present findings and design options**:
+5. **Present findings and design options**:
+
    ```
    Based on my research, here's what I found:
 
@@ -141,6 +148,7 @@ After getting initial clarifications:
 Once aligned on approach:
 
 1. **Create initial plan outline**:
+
    ```
    Here's my proposed plan structure:
 
@@ -187,6 +195,7 @@ After structure approval:
 [A Specification of the desired end state after this plan is complete, and how to verify it]
 
 ### Key Discoveries:
+
 - [Important finding with file:line reference]
 - [Pattern to follow]
 - [Constraint to work within]
@@ -202,11 +211,13 @@ After structure approval:
 ## Phase 1: [Descriptive Name]
 
 ### Overview
+
 [What this phase accomplishes]
 
 ### Changes Required:
 
 #### 1. [Component/File Group]
+
 **File**: `path/to/file.ext`
 **Changes**: [Summary of changes]
 
@@ -217,6 +228,7 @@ After structure approval:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Migration applies cleanly: `make migrate`
 - [ ] Unit tests pass: `make test`
 - [ ] Type checking passes: `npm run typecheck`
@@ -224,6 +236,7 @@ After structure approval:
 - [ ] Integration tests pass: `make test-integration`
 
 #### Manual Verification:
+
 - [ ] Feature works as expected when tested via UI
 - [ ] Performance is acceptable under load
 - [ ] Edge case handling verified manually
@@ -242,13 +255,16 @@ After structure approval:
 ## Testing Strategy
 
 ### Unit Tests:
+
 - [What to test]
 - [Key edge cases]
 
 ### Integration Tests:
+
 - [End-to-end scenarios]
 
 ### Manual Testing Steps:
+
 1. [Specific step to verify feature]
 2. [Another verification step]
 3. [Edge case to test manually]
@@ -269,6 +285,7 @@ After structure approval:
 ````
 
 3. **Present the draft plan location**:
+
    ```
    I've created the initial implementation plan at:
    `plans/YYYY-MM-DD-description.md`
@@ -344,16 +361,19 @@ After structure approval:
    - User acceptance criteria
 
 **Format example:**
+
 ```markdown
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Database migration runs successfully: `make migrate`
 - [ ] All unit tests pass: `go test ./...`
 - [ ] No linting errors: `golangci-lint run`
 - [ ] API endpoint returns 200: `curl localhost:8080/api/new-endpoint`
 
 #### Manual Verification:
+
 - [ ] New feature appears correctly in the UI
 - [ ] Performance is acceptable with 1000+ items
 - [ ] Error messages are user-friendly
@@ -363,6 +383,7 @@ After structure approval:
 ## Common Patterns
 
 ### For Database Changes:
+
 - Start with schema/migration
 - Add store methods
 - Update business logic
@@ -370,6 +391,7 @@ After structure approval:
 - Update clients
 
 ### For New Features:
+
 - Research existing patterns first
 - Start with data model
 - Build backend logic
@@ -377,6 +399,7 @@ After structure approval:
 - Implement UI last
 
 ### For Refactoring:
+
 - Document current behavior
 - Plan incremental changes
 - Maintain backwards compatibility
@@ -405,6 +428,7 @@ When spawning research sub-tasks:
    - Don't accept results that seem incorrect
 
 Example of spawning multiple tasks:
+
 ```python
 # Spawn these tasks concurrently:
 tasks = [
@@ -418,7 +442,7 @@ tasks = [
 ## Example Interaction Flow
 
 ```
-User: /create_plan
+User: /create-plan
 Assistant: I'll help you create a detailed implementation plan...
 
 User: We need to add parent-child tracking for background tasks. See docs/requirements/task-tracking.md

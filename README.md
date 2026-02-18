@@ -62,21 +62,21 @@ Also check docs/ for the API contract constraints.
 
 ### Local execution
 
-Each pipeline stage is defined as a Claude Code command in the `commands/` directory. Developers can run stages locally for exploration before committing to a full pipeline run:
+Each pipeline stage is defined as a Claude Code skill in the `skills/` directory. Developers can run stages locally for exploration before committing to a full pipeline run:
 
 ```
 # Research stage — produces research/YYYY-MM-DD-<description>.md
-/research_codebase Read issue #42 using gh and research what changes
+/research-codebase Read issue #42 using gh and research what changes
 are needed to add rate limiting.
 
 # Plan stage — produces plans/YYYY-MM-DD-<description>.md
-/create_plan research/2025-01-15-add-rate-limiting.md
+/create-plan research/2025-01-15-add-rate-limiting.md
 
 # Implementation stage — executes the plan
-/implement_plan plans/2025-01-15-add-rate-limiting.md
+/implement-plan plans/2025-01-15-add-rate-limiting.md
 ```
 
-The commands are interactive — they ask clarifying questions and present options between stages, so you can review and course-correct before proceeding.
+The skills are interactive — they ask clarifying questions and present options between stages, so you can review and course-correct before proceeding.
 
 ---
 
@@ -126,13 +126,13 @@ Copy the following workflow files from this repo into your repository:
 - [`.github/workflows/claude.yml`](.github/workflows/claude.yml) — Standard `@claude` interaction for ad-hoc questions on PRs and issues.
 - [`.github/workflows/monthly-agent-cleanup.yml`](.github/workflows/monthly-agent-cleanup.yml) — Sweeps `docs/agent-runs/` from main monthly.
 
-### Step 4: Add commands
+### Step 4: Add skills
 
-Copy the command files from this repo into your repository:
+Copy the skill files from this repo into your repository:
 
-- [`.claude/commands/research_codebase.md`](.claude/commands/research_codebase.md) — `/research_codebase` command
-- [`.claude/commands/create_plan.md`](.claude/commands/create_plan.md) — `/create_plan` command
-- [`.claude/commands/implement_plan.md`](.claude/commands/implement_plan.md) — `/implement_plan` command
+- [`.claude/skills/research-codebase/SKILL.md`](.claude/skills/research-codebase/SKILL.md) — `/research-codebase` skill
+- [`.claude/skills/create-plan/SKILL.md`](.claude/skills/create-plan/SKILL.md) — `/create-plan` skill
+- [`.claude/skills/implement-plan/SKILL.md`](.claude/skills/implement-plan/SKILL.md) — `/implement-plan` skill
 
 ### Step 5: Add CLAUDE.md
 
@@ -144,10 +144,10 @@ Create a `CLAUDE.md` file in your repository root. This is the core of the pipel
 your-repo/
 ├── CLAUDE.md
 ├── .claude/
-│   └── commands/
-│       ├── research_codebase.md    # /research_codebase command
-│       ├── create_plan.md          # /create_plan command
-│       └── implement_plan.md       # /implement_plan command
+│   └── skills/
+│       ├── research-codebase/SKILL.md   # /research-codebase skill
+│       ├── create-plan/SKILL.md        # /create-plan skill
+│       └── implement-plan/SKILL.md     # /implement-plan skill
 └── .github/
     └── workflows/
         ├── agent-pipeline.yml
@@ -332,24 +332,24 @@ This uses the standard `claude.yml` workflow and doesn't modify any files.
 
 ### Running stages locally
 
-Use the custom commands defined in `commands/` for exploratory work or to run stages one at a time:
+Use the skills defined in `skills/` for exploratory work or to run stages one at a time:
 
 **Research** — investigate the codebase and produce a structured research document:
 ```
-/research_codebase Read issue #42 using gh and research what changes
+/research-codebase Read issue #42 using gh and research what changes
 are needed to add rate limiting.
 ```
 Output: `research/2025-01-15-add-rate-limiting.md`
 
 **Plan** — read the research and create a phased implementation plan:
 ```
-/create_plan research/2025-01-15-add-rate-limiting.md
+/create-plan research/2025-01-15-add-rate-limiting.md
 ```
 Output: `plans/2025-01-15-add-rate-limiting.md`
 
 **Implement** — execute the plan with phased verification:
 ```
-/implement_plan plans/2025-01-15-add-rate-limiting.md
+/implement-plan plans/2025-01-15-add-rate-limiting.md
 ```
 Output: Code changes as described in the plan.
 
